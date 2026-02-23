@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.json">
+<title>Excel单词本</title>
+
+<!-- SheetJS -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+body{font-family:-apple-system;margin:0;padding:20px;background:#f5f5f7}
+nav{display:flex;justify-content:space-around;background:#000;color:#fff;padding:10px;cursor:pointer}
+section{display:none;padding:20px}
+.active{display:block}
+input,button,td{padding:8px;margin:2px;font-size:14px;border-radius:6px;border:1px solid #ccc}
+button{background:#000;color:#fff;border:none;cursor:pointer}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+td,th{border:1px solid #ddd;text-align:center;padding:8px}
+.word{font-size:26px;text-align:center;margin:15px 0}
+.small{color:#666;font-size:14px;margin-top:5px}
+.result{text-align:center;font-weight:bold;margin-top:10px}
+</style>
+</head>
+<body>
+
+<nav>
+<span onclick="show('learn')">学习</span>
+<span onclick="show('library')">单词库</span>
+</nav>
+
+<section id="learn" class="active">
+<div>
+<div class="word" id="showWord">点击开始学习</div>
+<div class="small" id="example"></div>
+<div class="small" id="root"></div>
+<input id="answer" placeholder="输入中文意思">
+<button onclick="speak()">🔊 发音</button>
+<button onclick="generateExample()">📖 例句</button>
+<button onclick="check()">提交</button>
+<button onclick="next()">下一个</button>
+<div class="result" id="result"></div>
+</div>
+</section>
+
+<section id="library">
+<h3>📂 单词库表格管理</h3>
+<input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+<button onclick="importFile()">📥 导入 Excel/CSV</button>
+<table id="wordTable">
+<thead>
+<tr><th>英文</th><th>中文</th><th>词根</th><th>操作</th></tr>
+</thead>
+<tbody></tbody>
+</table>
+<button onclick="addRow()">➕ 添加新行</button>
+<button onclick="saveTable()">💾 保存修改</button>
+</section>
+
+<script>
+let words = JSON.parse(localStorage.getItem("words")||"[]");
+let current = null;
+const prefixes=['un','re','in','im','dis','pre','mis','non','over','sub'];
+const suffixes=['ing','ed','ly','er','est','tion','sion','able','ible','al','ment'];
+
+// 页面切换
+function show(id){
+document.querySelectorAll("section").forEach(s=>s.classList.remove("active"));
+document.getElementById(id).classList.add("active");
+if(id==='library') renderTable();
+if(id==='learn') next();
+}
+
+// 自动词根识别
+function getRoot(word){
+word=word.toLowerCase();
+for(let p of prefixes){if(word.startsWith(p)) return p;}
+for(let s of suffixes){if(word.endsWith(s)) return s;}
+return '';
+}
+
+// 表格渲染
+function renderTable(){
+let tbody=document.querySelector("#wordTable tbody");
+tbody.innerHTML="";
+words.forEach((w,i)=>{
+let tr=document.createElement("tr");
+tr.innerHTML=`<td contenteditable="true" onblur="updateRoot(${i},this.innerText)">${w.word}</td>
+<td contenteditable="true">${w.meaning}</td>
+<td>${w.root||''}</td>
+<td><button onclick="deleteRow(${i})">🗑 删除</button></td>`;
+tbody.appendChild(tr);
+});
+}
+
+// 更新词根
+function updateRoot(i,word){
+words[i].word=word;
+words[i].root=getRoot(word);
+renderTable();
+}
+
+// 添加行
+function addRow(){
+words.push({word:'',meaning:'',root:'',level:0,nextReview:Date.now()});
+renderTable();
+}
+
+// 删除行
+function deleteRow(i){
+words.splice(i,1);
+renderTable();
+}
+
+// 保存表格
+function saveTable(){
+let tbody=document.querySelector("#wordTable tbody");
+words=[];
+tbody.querySelectorAll("tr").forEach(tr=>{
+let tds=tr.querySelectorAll("td");
+words.push({word:tds[0].innerText.trim(),meaning:tds[1].innerText.trim(),root:tds[2].innerText.trim(),level:0,nextReview:Date.now()});
+});
+localStorage.setItem("words",JSON.stringify(words));
+alert("保存成功！");
+}
+
+// 导入 Excel/CSV
+function importFile(){
+const file=document.getElementById("fileInput").files[0];
+if(!file){alert("请选择文件"); return;}
+const reader=new FileReader();
+reader.onload=function(e){
+const data=e.target.result;
+let wb;
+if(file.name.endsWith(".csv")){
+wb=XLSX.read(data,{type:'binary',codepage:65001});
+} else{
+wb=XLSX.read(data,{type:'binary'});
+}
+const sheetName=wb.SheetNames[0];
+const ws=wb.Sheets[sheetName];
+const json=XLSX.utils.sheet_to_json(ws,{header:["word","meaning","root"],defval:""});
+json.forEach(row=>{
+if(!row.root) row.root=getRoot(row.word);
+words.push({...row,level:0,nextReview:Date.now()});
+});
+localStorage.setItem("words",JSON.stringify(words));
+renderTable();
+alert("导入完成："+json.length+"条单词");
+};
+if(file.name.endsWith(".csv")){
+reader.readAsBinaryString(file);
+}else{
+reader.readAsBinaryString(file);
+}
+}
+
+// 学习逻辑
+function getDue(){return words.filter(w=>w.nextReview<=Date.now()).sort((a,b)=>b.level-a.level);}
+function next(){
+let due=getDue();
+if(due.length===0){
+document.getElementById("showWord").innerText="今日完成 🎉";
+document.getElementById("example").innerText="";
+document.getElementById("root").innerText="";
+return;
+}
+current=due[0];
+document.getElementById("showWord").innerText=current.word;
+document.getElementById("root").innerText=current.root||"暂无词根";
+document.getElementById("example").innerText=generateExample(current.word);
+document.getElementById("result").innerText="";
+document.getElementById("answer").value="";
+}
+
+function check(){
+if(!current) return;
+let ans=document.getElementById("answer").value.trim();
+if(ans===current.meaning){
+document.getElementById("result").innerText="✅ 正确";
+current.level++;
+}else{
+document.getElementById("result").innerText="❌ 正确答案："+current.meaning;
+current.level=0;
+}
+let intervals=[5,30,720,1440,2880,10080];
+current.nextReview=Date.now()+intervals[Math.min(current.level,5)]*60000;
+localStorage.setItem("words",JSON.stringify(words));
+}
+
+// 发音
+function speak(){
+if(!current) return;
+let audio=new Audio(`https://translate.google.com/translate_tts?ie=UTF-8&q=${current.word}&tl=en&client=tw-ob`);
+audio.play();
+}
+
+// 自动例句模板
+function generateExample(word){
+let templates=[
+`I use "${word}" in daily life.`,
+`Learning "${word}" helps improve English.`,
+`She tried to understand the meaning of "${word}".`,
+`Using "${word}" correctly is important.`,
+`The teacher explained "${word}" clearly.`
+];
+return templates[Math.floor(Math.random()*templates.length)];
+}
+
+</script>
+</body>
+</html>
